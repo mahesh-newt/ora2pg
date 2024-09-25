@@ -14537,8 +14537,9 @@ sub _restore_comments
 		delete $self->{comment_values}{$id};
 	};
 
-	# Restore start comment in a constant string
+	# Restore start comment and end comment in a constant string
 	$$content =~ s/\%OPEN_COMMENT\%/\/\*/gs;
+	$$content =~ s/\%CLOSE_COMMENT\%/\*\//gs;
 
 	if ($self->{string_constant_regexp}) {
 		# Replace potential text values that was replaced in comments
@@ -14560,9 +14561,13 @@ sub _remove_comments
 	# Fix comment in a string constant
 	$$content = encode('UTF-8', $$content) if (!$self->{input_file} && $self->{force_plsql_encoding});
 	while ($$content =~ s/('[^';\n]*)\/\*([^';\n]*')/$1\%OPEN_COMMENT\%$2/s) {};
+	while ($$content =~ s/('[^';\n]*)\*\/([^';\n]*')/$1\%CLOSE_COMMENT\%$2/s) {}; # adding close_comment for '*/'
 
 	# Fix unterminated comment at end of the code
 	$$content =~ s/(\/\*(?:(?!\*\/).)*)$/$1 \*\//s;
+
+	# declaring multiline comment flag set to false default
+	my $m_comment_flag = 'False';
 
 	# Replace some other cases that are breaking the parser (presence of -- in constant string, etc.)
 	my @lines = split(/([\n\r]+)/, $$content);
@@ -14573,13 +14578,28 @@ sub _remove_comments
 		if ($lines[$i] !~ /^[\t ]*\--.*\/\*.*\*\/.*$/ and $lines[$i] !~ /\/\*.*\*\/$/)
 		{
 			# Single line comment --...-- */ is replaced by  */ only
-			$lines[$i] =~ s/^([\t ]*)\-[\-]+\s*\*\//$1\*\//;
+			#$lines[$i] =~ s/^([\t ]*)\-[\-]+\s*\*\//$1\*\//; #commenting out this line due to interuption
+
+			# to check for line which has /*
+			if (!($lines[$i] =~ /.*--.*\/\*/ and $lines[$i] !~ /.*\/\*.*--/))
+			{
+				if ($lines[$i] =~ /\/\*.*$/ and $m_comment_flag eq 'False')
+				{
+					$m_comment_flag = 'True'; # setting flag to true
+				}
+			}
 
 			# Check for -- and */ in the same line
-			if ($lines[$i] =~ /(--.*)(\*\/.*)$/)
+			# if ($lines[$i] =~ /(--.*)(\*\/.*)$/)
+			if ($lines[$i] =~ /(.*?--.*?)(\*\/.*)$/ and $m_comment_flag eq 'True')
 			{
 				$lines[$i] = $1;
 				splice(@lines, $i + 1, 0, $2);
+				$m_comment_flag = 'False'; # reset flag to false
+			}
+			elsif ($lines[$i] =~ /(.*\*\/)/ and $m_comment_flag eq 'True')
+			{
+				$m_comment_flag = 'False';
 			}
 		}
 
